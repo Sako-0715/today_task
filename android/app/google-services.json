@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1011689133330",
+    "project_id": "todaytaskapp-b192d",
+    "storage_bucket": "todaytaskapp-b192d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1011689133330:android:abfe48b1f56ce6d8e14fcb",
+        "android_client_info": {
+          "package_name": "com.example.today_task"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAVeW2yOCFTQgIhRxlHXP9oNdbTOONw2G8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
