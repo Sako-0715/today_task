@@ -1,41 +1,50 @@
 import '../models/task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// タスク一覧の状態（State）を管理するViewModel
 /// [List<Task>] を状態として持ちます。
 class TaskViewModel extends StateNotifier<List<Task>> {
-  TaskViewModel() : super([]); // 最初は空のリスト
+  final _db = FirebaseFirestore.instance.collection('tasks');
 
-  /// 新しいタスクを追加します
-  void addTask(String title) {
+  TaskViewModel() : super([]) {
+    // 起動時に自動でデータの監視を開始する
+    fetchTasks();
+  }
+
+  /// データのリアルタイム監視
+  void fetchTasks() {
+    // サーバー側でデータが変わると、この中身が自動で実行されます
+    _db.orderBy('createdAt', descending: true).snapshots().listen((snapshot) {
+      state =
+          snapshot.docs.map((doc) {
+            return Task.getTask(doc.data(), doc.id);
+          }).toList();
+    });
+  }
+
+  /// 親がタスクを追加する
+  Future<void> addTask(String title) async {
     final newTask = Task(
-      id: DateTime.now().millisecondsSinceEpoch.toString(), // 簡易的なID生成
+      id: '', // Firebase側で自動採番されるので空でOK
       title: title,
       createdAt: DateTime.now(),
     );
-
-    // Flutterのルール: state自体を上書きすることで画面に通知が飛びます
-    state = [...state, newTask];
+    // Firestoreへ追加
+    await _db.add(newTask.setTaskData());
   }
 
-  /// タスクの完了・未完了を切り替えます
-  void toggleTask(String id) {
-    state = [
-      for (final task in state)
-        if (task.id == id)
-          task.updateTask(isCompleted: !task.isCompleted) // 先ほど作ったメソッドを活用
-        else
-          task,
-    ];
+  /// 子（または親）が完了状態を切り替える
+  Future<void> toggleTask(String id, bool currentStatus) async {
+    await _db.doc(id).update({'isCompleted': !currentStatus});
   }
 
-  /// タスクを削除します
-  void deleteTask(String id) {
-    state = state.where((task) => task.id != id).toList();
+  /// 親がタスクを削除する
+  Future<void> deleteTask(String id) async {
+    await _db.doc(id).delete();
   }
 }
 
-/// 外部（View）からViewModelを操作するための「窓口」
 final taskProvider = StateNotifierProvider<TaskViewModel, List<Task>>((ref) {
   return TaskViewModel();
 });
