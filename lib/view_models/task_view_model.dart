@@ -24,10 +24,11 @@ class TaskViewModel extends StateNotifier<List<Task>> {
   }
 
   /// 親がタスクを追加する
-  Future<void> addTask(String title) async {
+  Future<void> addTask(String title, String note) async {
     final newTask = Task(
       id: '', // Firebase側で自動採番されるので空でOK
       title: title,
+      note: note,
       createdAt: DateTime.now(),
     );
     // Firestoreへ追加

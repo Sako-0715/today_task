@@ -82,6 +82,16 @@ class TaskListPage extends ConsumerWidget {
                         color: task.isCompleted ? Colors.grey : Colors.black,
                       ),
                     ),
+                    subtitle:
+                        task.note.isNotEmpty
+                            ? Text(
+                              '※ ${task.note}',
+                              style: const TextStyle(
+                                color: Colors.deepOrange,
+                                fontSize: 13,
+                              ),
+                            )
+                            : null,
                     // ★親モードの時だけ削除ボタン（ゴミ箱）を表示
                     trailing:
                         isParent
@@ -112,16 +122,31 @@ class TaskListPage extends ConsumerWidget {
 
   // タスク追加ダイアログ
   void _showAddTaskDialog(BuildContext context, WidgetRef ref) {
-    final controller = TextEditingController();
+    final titleController = TextEditingController();
+    final noteController = TextEditingController();
     showDialog(
       context: context,
       builder:
           (context) => AlertDialog(
             title: const Text('新しいタスクを追加'),
-            content: TextField(
-              controller: controller,
-              autofocus: true,
-              decoration: const InputDecoration(hintText: '例：宿題をする'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleController,
+                  autofocus: true,
+                  decoration: const InputDecoration(hintText: 'タスク名（例：宿題をする）'),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: noteController,
+                  decoration: const InputDecoration(
+                    hintText: '注意書き（例：算数のドリル3ページ分）',
+                    hintStyle: TextStyle(fontSize: 14),
+                    prefixText: '※ ', // 入力しやすくするために「※」をあらかじめ表示
+                  ),
+                ),
+              ],
             ),
             actions: [
               TextButton(
@@ -130,8 +155,10 @@ class TaskListPage extends ConsumerWidget {
               ),
               TextButton(
                 onPressed: () {
-                  if (controller.text.isNotEmpty) {
-                    ref.read(taskProvider.notifier).addTask(controller.text);
+                  if (titleController.text.isNotEmpty) {
+                    ref
+                        .read(taskProvider.notifier)
+                        .addTask(titleController.text, noteController.text);
                     Navigator.pop(context);
                   }
                 },
