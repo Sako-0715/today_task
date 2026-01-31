@@ -216,7 +216,7 @@ class TaskListPage extends ConsumerWidget {
         if (hasStarted && previous != null && next.hasValue) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('⚠️ おうちの人がタスクを新しくしたよ！'),
+              content: Text('⚠️ リロードしてください'),
               backgroundColor: Colors.orange,
               duration: Duration(seconds: 10), // 長めに表示
             ),
