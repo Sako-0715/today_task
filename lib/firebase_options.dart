@@ -85,4 +85,5 @@ class DefaultFirebaseOptions {
     storageBucket: 'todaytaskapp-b192d.firebasestorage.app',
     measurementId: 'G-NWPM4B0FWM',
   );
+
 }
