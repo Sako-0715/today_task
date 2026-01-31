@@ -212,16 +212,13 @@ class TaskListPage extends ConsumerWidget {
     // --- 子モードの時の更新通知ロジック ---
     if (mode == UserMode.child) {
       ref.listen(updateStreamProvider, (previous, next) {
-        // すでに1つ以上完了しているか確認
         final hasStarted = taskList.any((task) => task.isCompleted);
-
-        // 1つ以上完了していて、かつ前回のデータと異なる（＝親が何か更新した）場合
         if (hasStarted && previous != null && next.hasValue) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('⚠️ おうちの人がタスクを新しくしたよ！'),
               backgroundColor: Colors.orange,
-              duration: Duration(seconds: 5),
+              duration: Duration(seconds: 10), // 長めに表示
             ),
           );
         }
@@ -262,47 +259,66 @@ class TaskListPage extends ConsumerWidget {
             ),
         ],
       ),
-      body:
-          taskList.isEmpty
-              ? const Center(child: Text('タスクはありません'))
-              : isParent
-              ? ReorderableListView.builder(
-                itemCount: taskList.length,
-                proxyDecorator:
-                    (child, index, animation) => Material(
-                      child: child,
-                      elevation: 6,
-                      color: Colors.blue.withOpacity(0.1),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          // ★ 追加：リロード時に通知を消す
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+          ref.read(taskProvider.notifier).fetchTasks();
+          await Future.delayed(const Duration(milliseconds: 500));
+        },
+        child:
+            taskList.isEmpty
+                ? const Center(
+                  child: SingleChildScrollView(
+                    physics: AlwaysScrollableScrollPhysics(),
+                    child: SizedBox(
+                      height: 200,
+                      child: Center(child: Text('タスクはありません')),
                     ),
-                onReorder:
-                    (old, next) =>
-                        ref.read(taskProvider.notifier).reorderTasks(old, next),
-                itemBuilder: (context, index) {
-                  final task = taskList[index];
-                  return ReorderableDragStartListener(
-                    key: ValueKey(task.id),
-                    index: index,
-                    child: _buildTaskTile(
-                      context,
-                      ref,
-                      task,
-                      mode,
+                  ),
+                )
+                : isParent
+                ? ReorderableListView.builder(
+                  itemCount: taskList.length,
+                  proxyDecorator:
+                      (child, index, animation) => Material(
+                        child: child,
+                        elevation: 6,
+                        color: Colors.blue.withOpacity(0.1),
+                      ),
+                  onReorder:
+                      (old, next) => ref
+                          .read(taskProvider.notifier)
+                          .reorderTasks(old, next),
+                  itemBuilder: (context, index) {
+                    final task = taskList[index];
+                    return ReorderableDragStartListener(
                       key: ValueKey(task.id),
-                    ),
-                  );
-                },
-              )
-              : ListView.builder(
-                itemCount: taskList.length,
-                itemBuilder:
-                    (context, index) => _buildTaskTile(
-                      context,
-                      ref,
-                      taskList[index],
-                      mode,
-                      key: ValueKey(taskList[index].id),
-                    ),
-              ),
+                      index: index,
+                      child: _buildTaskTile(
+                        context,
+                        ref,
+                        task,
+                        mode,
+                        key: ValueKey(task.id),
+                      ),
+                    );
+                  },
+                )
+                : ListView.builder(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  itemCount: taskList.length,
+                  itemBuilder:
+                      (context, index) => _buildTaskTile(
+                        context,
+                        ref,
+                        taskList[index],
+                        mode,
+                        key: ValueKey(taskList[index].id),
+                      ),
+                ),
+      ),
       floatingActionButton:
           isParent
               ? FloatingActionButton(
@@ -313,6 +329,7 @@ class TaskListPage extends ConsumerWidget {
     );
   }
 
+  // --- 以降の補助関数は変更なし ---
   Widget _buildIconButton(IconData icon, String label, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
