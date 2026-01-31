@@ -7,7 +7,7 @@ import 'firebase_options.dart';
 import 'models/task.dart';
 import 'view_models/task_view_model.dart';
 
-enum UserMode { none, parent, child }
+enum UserMode { none, parent, child, preview } // プレビューモードを追加
 
 final userModeProvider = StateNotifierProvider<UserModeNotifier, UserMode>((
   ref,
@@ -44,8 +44,15 @@ class UserModeNotifier extends StateNotifier<UserMode> {
   Future<void> setMode(UserMode mode) async {
     state = mode;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_key, mode.name);
+    if (mode != UserMode.preview) {
+      await prefs.setString(_key, mode.name);
+    }
   }
+
+  // 親が子の画面をプレビューする
+  void enterPreview() => state = UserMode.preview;
+  // プレビューから親画面に戻る
+  void exitPreview() => state = UserMode.parent;
 
   Future<void> logout() async {
     state = UserMode.none;
@@ -208,27 +215,76 @@ class TaskListPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final taskList = ref.watch(taskProvider);
     final mode = ref.watch(userModeProvider);
+
     final bool isParent = mode == UserMode.parent;
+    final bool isPreview = mode == UserMode.preview;
+    final bool isChild = mode == UserMode.child;
 
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Text(isParent ? 'タスク管理' : '今日のタスク'),
-        centerTitle: true,
-        leadingWidth: 80,
-        leading: InkWell(
-          onTap: () => ref.read(userModeProvider.notifier).logout(),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: const [
-              Icon(Icons.logout, size: 20),
-              Text(
-                'ログアウト',
-                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
+        // タイトル部分
+        title: Text(
+          isParent
+              ? 'タスク管理'
+              : isPreview
+              ? '子の画面(プレビュー)'
+              : '今日のタスク',
         ),
+        centerTitle: true,
+
+        // --- 左側：子の画面を見るボタン（親モード時のみ） ---
+        leadingWidth: 80,
+        leading:
+            isParent
+                ? InkWell(
+                  onTap:
+                      () => ref.read(userModeProvider.notifier).enterPreview(),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: const [
+                      Icon(Icons.child_care, size: 24, color: Colors.blue),
+                      Text(
+                        '子の画面',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+                : isPreview
+                ? IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed:
+                      () => ref.read(userModeProvider.notifier).exitPreview(),
+                )
+                : null,
+
+        // --- 右側：ログアウトボタン ---
+        actions: [
+          if (!isPreview) // プレビュー中は右側をスッキリさせる
+            SizedBox(
+              width: 80,
+              child: InkWell(
+                onTap: () => ref.read(userModeProvider.notifier).logout(),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    Icon(Icons.logout, size: 20),
+                    Text(
+                      'ログアウト',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
       body:
           taskList.isEmpty
@@ -238,34 +294,28 @@ class TaskListPage extends ConsumerWidget {
               : isParent
               ? ReorderableListView.builder(
                 itemCount: taskList.length,
-                onReorder: (oldIndex, newIndex) {
-                  ref
-                      .read(taskProvider.notifier)
-                      .reorderTasks(oldIndex, newIndex);
-                },
-                itemBuilder: (context, index) {
-                  final task = taskList[index];
-                  return _buildTaskTile(
-                    context,
-                    ref,
-                    task,
-                    isParent,
-                    key: ValueKey(task.id),
-                  );
-                },
+                onReorder:
+                    (old, next) =>
+                        ref.read(taskProvider.notifier).reorderTasks(old, next),
+                itemBuilder:
+                    (context, index) => _buildTaskTile(
+                      context,
+                      ref,
+                      taskList[index],
+                      mode,
+                      key: ValueKey(taskList[index].id),
+                    ),
               )
               : ListView.builder(
                 itemCount: taskList.length,
-                itemBuilder: (context, index) {
-                  final task = taskList[index];
-                  return _buildTaskTile(
-                    context,
-                    ref,
-                    task,
-                    isParent,
-                    key: ValueKey(task.id),
-                  );
-                },
+                itemBuilder:
+                    (context, index) => _buildTaskTile(
+                      context,
+                      ref,
+                      taskList[index],
+                      mode,
+                      key: ValueKey(taskList[index].id),
+                    ),
               ),
       floatingActionButton:
           isParent
@@ -281,20 +331,22 @@ class TaskListPage extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
     Task task,
-    bool isParent, {
+    UserMode mode, {
     required Key key,
   }) {
+    final bool isParent = mode == UserMode.parent;
+    final bool isPreview = mode == UserMode.preview;
+
     return ListTile(
       key: key,
       leading:
           isParent
-              ? const Icon(Icons.drag_handle, color: Colors.grey) // 親は並べ替え用ハンドル
+              ? const Icon(Icons.drag_handle, color: Colors.grey)
               : Checkbox(
-                // 子はチェックボックス
                 value: task.isCompleted,
                 onChanged:
-                    task.isCompleted
-                        ? null
+                    (isPreview || task.isCompleted)
+                        ? null // プレビュー中は操作不能にする
                         : (val) =>
                             _showCompleteConfirmDialog(context, ref, task),
               ),
@@ -309,7 +361,7 @@ class TaskListPage extends ConsumerWidget {
       trailing:
           isParent
               ? _buildParentActions(ref, task)
-              : _buildChildActions(context, ref, task),
+              : _buildChildActions(context, ref, task, isPreview),
     );
   }
 
@@ -352,10 +404,18 @@ class TaskListPage extends ConsumerWidget {
     );
   }
 
-  Widget? _buildChildActions(BuildContext context, WidgetRef ref, Task task) {
+  Widget? _buildChildActions(
+    BuildContext context,
+    WidgetRef ref,
+    Task task,
+    bool isPreview,
+  ) {
     if (task.isCompleted && task.requestNote.isEmpty) {
       return TextButton(
-        onPressed: () => _showRequestCorrectionDialog(context, ref, task),
+        onPressed:
+            isPreview
+                ? null
+                : () => _showRequestCorrectionDialog(context, ref, task),
         child: const Text(
           'まちがえた',
           style: TextStyle(color: Colors.redAccent, fontSize: 12),
@@ -390,6 +450,7 @@ class TaskListPage extends ConsumerWidget {
     );
   }
 
+  // --- ダイアログ等は以前のコードと同様 ---
   void _showCompleteConfirmDialog(
     BuildContext context,
     WidgetRef ref,
