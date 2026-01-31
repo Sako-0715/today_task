@@ -7,7 +7,7 @@ import 'firebase_options.dart';
 import 'models/task.dart';
 import 'view_models/task_view_model.dart';
 
-enum UserMode { none, parent, child, preview } // プレビューモードを追加
+enum UserMode { none, parent, child, preview }
 
 final userModeProvider = StateNotifierProvider<UserModeNotifier, UserMode>((
   ref,
@@ -29,15 +29,11 @@ class UserModeNotifier extends StateNotifier<UserMode> {
 
     if (savedMode == 'parent') {
       state = UserMode.parent;
-      return;
     } else if (savedMode == 'child') {
       state = UserMode.child;
-      return;
-    }
-
-    final isParent = await ref.read(taskProvider.notifier).isParentDevice();
-    if (isParent) {
-      await setMode(UserMode.parent);
+    } else {
+      final isParent = await ref.read(taskProvider.notifier).isParentDevice();
+      if (isParent) await setMode(UserMode.parent);
     }
   }
 
@@ -49,9 +45,7 @@ class UserModeNotifier extends StateNotifier<UserMode> {
     }
   }
 
-  // 親が子の画面をプレビューする
   void enterPreview() => state = UserMode.preview;
-  // プレビューから親画面に戻る
   void exitPreview() => state = UserMode.parent;
 
   Future<void> logout() async {
@@ -64,10 +58,8 @@ class UserModeNotifier extends StateNotifier<UserMode> {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
   final messaging = FirebaseMessaging.instance;
   await messaging.requestPermission(alert: true, badge: true, sound: true);
-
   runApp(const ProviderScope(child: MyApp()));
 }
 
@@ -77,7 +69,6 @@ class MyApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final mode = ref.watch(userModeProvider);
-
     return MaterialApp(
       title: 'Today Task',
       debugShowCheckedModeBanner: false,
@@ -90,7 +81,6 @@ class MyApp extends ConsumerWidget {
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.white,
           foregroundColor: Colors.black,
-          elevation: 0,
         ),
       ),
       home:
@@ -107,7 +97,6 @@ class ModeSelectionPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
-      backgroundColor: Colors.white,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -117,43 +106,40 @@ class ModeSelectionPage extends ConsumerWidget {
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 40),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed:
-                          () => ref
-                              .read(userModeProvider.notifier)
-                              .setMode(UserMode.child),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 20),
-                      ),
-                      child: const Text(
-                        'タスク確認\n(かくにん)',
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 20),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () => _showAuthDialog(context, ref),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 20),
-                      ),
-                      child: const Text(
-                        'タスク登録\n(とうろく)',
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildModeButton(
+                  context,
+                  'タスク確認\n(かくにん)',
+                  () => ref
+                      .read(userModeProvider.notifier)
+                      .setMode(UserMode.child),
+                ),
+                _buildModeButton(
+                  context,
+                  'タスク登録\n(とうろく)',
+                  () => _showAuthDialog(context, ref),
+                ),
+              ],
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildModeButton(
+    BuildContext context,
+    String text,
+    VoidCallback onPressed,
+  ) {
+    return SizedBox(
+      width: 150,
+      height: 100,
+      child: ElevatedButton(
+        onPressed: onPressed,
+        child: Text(text, textAlign: TextAlign.center),
       ),
     );
   }
@@ -194,10 +180,6 @@ class ModeSelectionPage extends ConsumerWidget {
                     ref
                         .read(userModeProvider.notifier)
                         .setMode(UserMode.parent);
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('IDまたはパスワードが違います')),
-                    );
                   }
                 },
                 child: const Text('OK'),
@@ -215,15 +197,11 @@ class TaskListPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final taskList = ref.watch(taskProvider);
     final mode = ref.watch(userModeProvider);
-
     final bool isParent = mode == UserMode.parent;
     final bool isPreview = mode == UserMode.preview;
-    final bool isChild = mode == UserMode.child;
 
     return Scaffold(
-      backgroundColor: Colors.white,
       appBar: AppBar(
-        // タイトル部分
         title: Text(
           isParent
               ? 'タスク管理'
@@ -232,27 +210,13 @@ class TaskListPage extends ConsumerWidget {
               : '今日のタスク',
         ),
         centerTitle: true,
-
-        // --- 左側：子の画面を見るボタン（親モード時のみ） ---
         leadingWidth: 80,
         leading:
             isParent
-                ? InkWell(
-                  onTap:
-                      () => ref.read(userModeProvider.notifier).enterPreview(),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: const [
-                      Icon(Icons.child_care, size: 24, color: Colors.blue),
-                      Text(
-                        '子の画面',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
+                ? _buildIconButton(
+                  Icons.child_care,
+                  '子の画面',
+                  () => ref.read(userModeProvider.notifier).enterPreview(),
                 )
                 : isPreview
                 ? IconButton(
@@ -261,50 +225,45 @@ class TaskListPage extends ConsumerWidget {
                       () => ref.read(userModeProvider.notifier).exitPreview(),
                 )
                 : null,
-
-        // --- 右側：ログアウトボタン ---
         actions: [
-          if (!isPreview) // プレビュー中は右側をスッキリさせる
-            SizedBox(
-              width: 80,
-              child: InkWell(
-                onTap: () => ref.read(userModeProvider.notifier).logout(),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: const [
-                    Icon(Icons.logout, size: 20),
-                    Text(
-                      'ログアウト',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+          if (!isPreview)
+            _buildIconButton(
+              Icons.logout,
+              'ログアウト',
+              () => ref.read(userModeProvider.notifier).logout(),
             ),
         ],
       ),
       body:
           taskList.isEmpty
-              ? const Center(
-                child: Text('タスクはありません', style: TextStyle(color: Colors.grey)),
-              )
+              ? const Center(child: Text('タスクはありません'))
               : isParent
               ? ReorderableListView.builder(
                 itemCount: taskList.length,
+                proxyDecorator:
+                    (child, index, animation) => Material(
+                      child: child,
+                      elevation: 6,
+                      color: Colors.blue.withOpacity(0.1),
+                    ),
                 onReorder:
                     (old, next) =>
                         ref.read(taskProvider.notifier).reorderTasks(old, next),
-                itemBuilder:
-                    (context, index) => _buildTaskTile(
+                itemBuilder: (context, index) {
+                  final task = taskList[index];
+                  // エミュレーター（マウス）での操作を有効にするためのリスナーを追加
+                  return ReorderableDragStartListener(
+                    key: ValueKey(task.id),
+                    index: index,
+                    child: _buildTaskTile(
                       context,
                       ref,
-                      taskList[index],
+                      task,
                       mode,
-                      key: ValueKey(taskList[index].id),
+                      key: ValueKey(task.id),
                     ),
+                  );
+                },
               )
               : ListView.builder(
                 itemCount: taskList.length,
@@ -327,6 +286,19 @@ class TaskListPage extends ConsumerWidget {
     );
   }
 
+  Widget _buildIconButton(IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 22),
+          Text(label, style: const TextStyle(fontSize: 10)),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTaskTile(
     BuildContext context,
     WidgetRef ref,
@@ -346,7 +318,7 @@ class TaskListPage extends ConsumerWidget {
                 value: task.isCompleted,
                 onChanged:
                     (isPreview || task.isCompleted)
-                        ? null // プレビュー中は操作不能にする
+                        ? null
                         : (val) =>
                             _showCompleteConfirmDialog(context, ref, task),
               ),
@@ -385,14 +357,13 @@ class TaskListPage extends ConsumerWidget {
           ),
         if (task.requestNote.isNotEmpty)
           Container(
-            margin: const EdgeInsets.only(top: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 4),
             decoration: BoxDecoration(
               color: Colors.red.shade50,
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(
-              '⚠️ていせいのおねがい：${task.requestNote}',
+              '⚠️ていせいいらい：${task.requestNote}',
               style: const TextStyle(
                 color: Colors.red,
                 fontSize: 11,
@@ -450,20 +421,17 @@ class TaskListPage extends ConsumerWidget {
     );
   }
 
-  // --- ダイアログ等は以前のコードと同様 ---
   void _showCompleteConfirmDialog(
     BuildContext context,
     WidgetRef ref,
     Task task,
   ) {
-    final now = DateTime.now();
-    final timeString = "${now.hour}時${now.minute.toString().padLeft(2, '0')}分";
     showDialog(
       context: context,
       builder:
           (context) => AlertDialog(
             title: const Text('おわった！'),
-            content: Text('「${task.title}」を\n$timeString に おわらせたよ！\n登録してもいい？'),
+            content: Text('「${task.title}」を登録してもいい？'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
@@ -496,7 +464,6 @@ class TaskListPage extends ConsumerWidget {
             title: const Text('まちがえた？'),
             content: TextField(
               controller: controller,
-              autofocus: true,
               decoration: const InputDecoration(hintText: 'りゆう'),
             ),
             actions: [
@@ -533,16 +500,11 @@ class TaskListPage extends ConsumerWidget {
               children: [
                 TextField(
                   controller: titleController,
-                  autofocus: true,
                   decoration: const InputDecoration(hintText: 'タスク名'),
                 ),
-                const SizedBox(height: 16),
                 TextField(
                   controller: noteController,
-                  decoration: const InputDecoration(
-                    hintText: '注意書き',
-                    prefixText: '※ ',
-                  ),
+                  decoration: const InputDecoration(hintText: '注意書き'),
                 ),
               ],
             ),
