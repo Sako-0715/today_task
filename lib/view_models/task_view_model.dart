@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'package:device_info_plus/device_info_plus.dart';
-import 'package:flutter/foundation.dart'; // kIsWeb を使うため
+import 'package:flutter/foundation.dart';
 import '../models/task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -13,9 +13,9 @@ class TaskViewModel extends StateNotifier<List<Task>> {
     fetchTasks();
   }
 
-  /// デバイス固有のIDを取得する（Web実行時も考慮）
+  /// デバイス固有のIDを取得する
   Future<String?> getDeviceId() async {
-    if (kIsWeb) return 'web_user'; // Webの場合は固定値を返すか、別の仕組みを検討
+    if (kIsWeb) return 'web_user';
 
     final deviceInfo = DeviceInfoPlugin();
     try {
@@ -53,10 +53,10 @@ class TaskViewModel extends StateNotifier<List<Task>> {
     return false;
   }
 
-  /// タスク一覧のリアルタイム監視
+  /// タスク一覧のリアルタイム監視 (order順に取得)
   void fetchTasks() {
     _db
-        .orderBy('createdAt', descending: true)
+        .orderBy('order', descending: false) // 並び順フィールドでソート
         .snapshots()
         .listen(
           (snapshot) {
@@ -71,13 +71,39 @@ class TaskViewModel extends StateNotifier<List<Task>> {
         );
   }
 
-  /// 親がタスクを追加する
+  /// タスクの並べ替え処理
+  Future<void> reorderTasks(int oldIndex, int newIndex) async {
+    // インデックスの調整 (ReorderableListViewの仕様)
+    if (oldIndex < newIndex) {
+      newIndex -= 1;
+    }
+
+    // ローカルの状態を並べ替えて即時反映
+    final items = [...state];
+    final item = items.removeAt(oldIndex);
+    items.insert(newIndex, item);
+    state = items;
+
+    // Firebase側の order フィールドを一括更新
+    final batch = FirebaseFirestore.instance.batch();
+    for (int i = 0; i < items.length; i++) {
+      final docRef = _db.doc(items[i].id);
+      batch.update(docRef, {'order': i});
+    }
+    await batch.commit();
+  }
+
+  /// 親がタスクを追加する (最後尾に追加)
   Future<void> addTask(String title, String note) async {
+    // 現在のリストの末尾になるようにorderを設定
+    final int nextOrder = state.isEmpty ? 0 : state.length;
+
     final newTask = Task(
       id: '',
       title: title,
       note: note,
       createdAt: DateTime.now(),
+      order: nextOrder,
     );
     await _db.add(newTask.setTaskData());
   }
@@ -87,11 +113,8 @@ class TaskViewModel extends StateNotifier<List<Task>> {
     final bool nextStatus = !currentStatus;
     await _db.doc(id).update({
       'isCompleted': nextStatus,
-      'completedAt':
-          nextStatus
-              ? FieldValue.serverTimestamp()
-              : null, // Firebaseサーバーの時間を使用
-      'requestNote': '', // 完了したら申請はリセット
+      'completedAt': nextStatus ? FieldValue.serverTimestamp() : null,
+      'requestNote': '',
     });
   }
 
@@ -100,7 +123,7 @@ class TaskViewModel extends StateNotifier<List<Task>> {
     await _db.doc(id).update({'requestNote': reason});
   }
 
-  /// 親が訂正依頼を「OK（やり直しを許可）」する
+  /// 親が訂正依頼を「OK」する
   Future<void> approveCorrection(String id) async {
     await _db.doc(id).update({
       'isCompleted': false,
@@ -109,7 +132,7 @@ class TaskViewModel extends StateNotifier<List<Task>> {
     });
   }
 
-  /// 親が訂正依頼を「ダメ（却下）」する
+  /// 親が訂正依頼を「却下」する
   Future<void> rejectCorrection(String id) async {
     await _db.doc(id).update({'requestNote': ''});
   }
@@ -117,6 +140,7 @@ class TaskViewModel extends StateNotifier<List<Task>> {
   /// 親がタスクを削除する
   Future<void> deleteTask(String id) async {
     await _db.doc(id).delete();
+    // 削除後、残ったタスクのorderを詰め直す場合はここでbatch処理
   }
 }
 

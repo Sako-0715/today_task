@@ -4,12 +4,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'firebase_options.dart';
-import 'models/task.dart'; // Task型を使用するために追加
+import 'models/task.dart';
 import 'view_models/task_view_model.dart';
 
 enum UserMode { none, parent, child }
 
-// モード管理プロバイダー
 final userModeProvider = StateNotifierProvider<UserModeNotifier, UserMode>((
   ref,
 ) {
@@ -28,7 +27,6 @@ class UserModeNotifier extends StateNotifier<UserMode> {
     final prefs = await SharedPreferences.getInstance();
     final savedMode = prefs.getString(_key);
 
-    // 1. ローカル保存優先
     if (savedMode == 'parent') {
       state = UserMode.parent;
       return;
@@ -37,7 +35,6 @@ class UserModeNotifier extends StateNotifier<UserMode> {
       return;
     }
 
-    // 2. 保存がない場合、Firebase側の登録デバイスIDと照合
     final isParent = await ref.read(taskProvider.notifier).isParentDevice();
     if (isParent) {
       await setMode(UserMode.parent);
@@ -157,7 +154,6 @@ class ModeSelectionPage extends ConsumerWidget {
   void _showAuthDialog(BuildContext context, WidgetRef ref) {
     final idController = TextEditingController();
     final passController = TextEditingController();
-
     showDialog(
       context: context,
       builder:
@@ -217,11 +213,21 @@ class TaskListPage extends ConsumerWidget {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Text(isParent ? '【親】タスクを出す' : '【子】今日のタスク'),
+        title: Text(isParent ? 'タスク管理' : '今日のタスク'),
         centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.logout),
-          onPressed: () => ref.read(userModeProvider.notifier).logout(),
+        leadingWidth: 80,
+        leading: InkWell(
+          onTap: () => ref.read(userModeProvider.notifier).logout(),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              Icon(Icons.logout, size: 20),
+              Text(
+                'ログアウト',
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
         ),
       ),
       body:
@@ -229,37 +235,35 @@ class TaskListPage extends ConsumerWidget {
               ? const Center(
                 child: Text('タスクはありません', style: TextStyle(color: Colors.grey)),
               )
+              : isParent
+              ? ReorderableListView.builder(
+                itemCount: taskList.length,
+                onReorder: (oldIndex, newIndex) {
+                  ref
+                      .read(taskProvider.notifier)
+                      .reorderTasks(oldIndex, newIndex);
+                },
+                itemBuilder: (context, index) {
+                  final task = taskList[index];
+                  return _buildTaskTile(
+                    context,
+                    ref,
+                    task,
+                    isParent,
+                    key: ValueKey(task.id),
+                  );
+                },
+              )
               : ListView.builder(
                 itemCount: taskList.length,
                 itemBuilder: (context, index) {
                   final task = taskList[index];
-                  return ListTile(
-                    leading: Checkbox(
-                      value: task.isCompleted,
-                      onChanged:
-                          task.isCompleted
-                              ? null
-                              : (val) => _showCompleteConfirmDialog(
-                                context,
-                                ref,
-                                task,
-                              ),
-                    ),
-                    title: Text(
-                      task.title,
-                      style: TextStyle(
-                        decoration:
-                            task.isCompleted
-                                ? TextDecoration.lineThrough
-                                : null,
-                        color: task.isCompleted ? Colors.grey : Colors.black,
-                      ),
-                    ),
-                    subtitle: _buildSubtitle(task),
-                    trailing:
-                        isParent
-                            ? _buildParentActions(ref, task)
-                            : _buildChildActions(context, ref, task),
+                  return _buildTaskTile(
+                    context,
+                    ref,
+                    task,
+                    isParent,
+                    key: ValueKey(task.id),
                   );
                 },
               ),
@@ -270,6 +274,42 @@ class TaskListPage extends ConsumerWidget {
                 child: const Icon(Icons.add),
               )
               : null,
+    );
+  }
+
+  Widget _buildTaskTile(
+    BuildContext context,
+    WidgetRef ref,
+    Task task,
+    bool isParent, {
+    required Key key,
+  }) {
+    return ListTile(
+      key: key,
+      leading:
+          isParent
+              ? const Icon(Icons.drag_handle, color: Colors.grey) // 親は並べ替え用ハンドル
+              : Checkbox(
+                // 子はチェックボックス
+                value: task.isCompleted,
+                onChanged:
+                    task.isCompleted
+                        ? null
+                        : (val) =>
+                            _showCompleteConfirmDialog(context, ref, task),
+              ),
+      title: Text(
+        task.title,
+        style: TextStyle(
+          decoration: task.isCompleted ? TextDecoration.lineThrough : null,
+          color: task.isCompleted ? Colors.grey : Colors.black,
+        ),
+      ),
+      subtitle: _buildSubtitle(task),
+      trailing:
+          isParent
+              ? _buildParentActions(ref, task)
+              : _buildChildActions(context, ref, task),
     );
   }
 

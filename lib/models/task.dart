@@ -9,6 +9,7 @@ class Task {
   final DateTime createdAt; // 作成日時
   final DateTime? completedAt; // 完了した時間
   final String requestNote; // 訂正の理由（空文字なら申請なし）
+  final int order; // 並び順を管理するためのフィールド（数値が小さいほど上）
 
   Task({
     required this.id,
@@ -18,6 +19,7 @@ class Task {
     required this.createdAt,
     this.completedAt,
     this.requestNote = '',
+    this.order = 0, // デフォルトは0
   });
 
   /// 特定のプロパティだけを書き換えた新しいインスタンスを作成します
@@ -29,6 +31,7 @@ class Task {
     DateTime? createdAt,
     DateTime? completedAt,
     String? requestNote,
+    int? order,
   }) {
     return Task(
       id: id ?? this.id,
@@ -38,6 +41,7 @@ class Task {
       createdAt: createdAt ?? this.createdAt,
       completedAt: completedAt ?? this.completedAt,
       requestNote: requestNote ?? this.requestNote,
+      order: order ?? this.order,
     );
   }
 
@@ -48,7 +52,7 @@ class Task {
       title: map['title'] ?? '',
       note: map['note'] ?? '',
       isCompleted: map['isCompleted'] ?? false,
-      // FirebaseのTimestamp型をDartのDateTimeに変換（型チェック付き）
+      // FirebaseのTimestamp型をDartのDateTimeに変換
       createdAt:
           map['createdAt'] is Timestamp
               ? (map['createdAt'] as Timestamp).toDate()
@@ -58,6 +62,7 @@ class Task {
               ? (map['completedAt'] as Timestamp).toDate()
               : null,
       requestNote: map['requestNote'] ?? '',
+      order: map['order'] ?? 0, // Firestoreからorderを取得
     );
   }
 
@@ -70,6 +75,7 @@ class Task {
       'createdAt': createdAt,
       'completedAt': completedAt,
       'requestNote': requestNote,
+      'order': order, // Firestoreへorderを保存
     };
   }
 }
