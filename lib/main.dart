@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,6 +9,14 @@ import 'models/task.dart';
 import 'view_models/task_view_model.dart';
 
 enum UserMode { none, parent, child, preview }
+
+// 更新監視用のProvider
+final updateStreamProvider = StreamProvider<DocumentSnapshot>((ref) {
+  return FirebaseFirestore.instance
+      .collection('config')
+      .doc('updates')
+      .snapshots();
+});
 
 final userModeProvider = StateNotifierProvider<UserModeNotifier, UserMode>((
   ref,
@@ -200,6 +209,25 @@ class TaskListPage extends ConsumerWidget {
     final bool isParent = mode == UserMode.parent;
     final bool isPreview = mode == UserMode.preview;
 
+    // --- 子モードの時の更新通知ロジック ---
+    if (mode == UserMode.child) {
+      ref.listen(updateStreamProvider, (previous, next) {
+        // すでに1つ以上完了しているか確認
+        final hasStarted = taskList.any((task) => task.isCompleted);
+
+        // 1つ以上完了していて、かつ前回のデータと異なる（＝親が何か更新した）場合
+        if (hasStarted && previous != null && next.hasValue) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('⚠️ おうちの人がタスクを新しくしたよ！'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 5),
+            ),
+          );
+        }
+      });
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -251,7 +279,6 @@ class TaskListPage extends ConsumerWidget {
                         ref.read(taskProvider.notifier).reorderTasks(old, next),
                 itemBuilder: (context, index) {
                   final task = taskList[index];
-                  // エミュレーター（マウス）での操作を有効にするためのリスナーを追加
                   return ReorderableDragStartListener(
                     key: ValueKey(task.id),
                     index: index,

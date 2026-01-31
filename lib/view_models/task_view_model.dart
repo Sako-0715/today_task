@@ -13,10 +13,17 @@ class TaskViewModel extends StateNotifier<List<Task>> {
     fetchTasks();
   }
 
+  /// 更新通知用のフラグをFirebaseに書き込む
+  /// 親が「追加」「削除」「並び替え」をした時に実行する
+  Future<void> _notifyUpdate() async {
+    await _config.doc('updates').set({
+      'lastUpdatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   /// デバイス固有のIDを取得する
   Future<String?> getDeviceId() async {
     if (kIsWeb) return 'web_user';
-
     final deviceInfo = DeviceInfoPlugin();
     try {
       if (Platform.isIOS) {
@@ -56,7 +63,7 @@ class TaskViewModel extends StateNotifier<List<Task>> {
   /// タスク一覧のリアルタイム監視 (order順に取得)
   void fetchTasks() {
     _db
-        .orderBy('order', descending: false) // 並び順フィールドでソート
+        .orderBy('order', descending: false)
         .snapshots()
         .listen(
           (snapshot) {
@@ -73,31 +80,29 @@ class TaskViewModel extends StateNotifier<List<Task>> {
 
   /// タスクの並べ替え処理
   Future<void> reorderTasks(int oldIndex, int newIndex) async {
-    // インデックスの調整 (ReorderableListViewの仕様)
     if (oldIndex < newIndex) {
       newIndex -= 1;
     }
 
-    // ローカルの状態を並べ替えて即時反映
     final items = [...state];
     final item = items.removeAt(oldIndex);
     items.insert(newIndex, item);
     state = items;
 
-    // Firebase側の order フィールドを一括更新
     final batch = FirebaseFirestore.instance.batch();
     for (int i = 0; i < items.length; i++) {
       final docRef = _db.doc(items[i].id);
       batch.update(docRef, {'order': i});
     }
     await batch.commit();
+
+    // 並び替え完了を通知
+    await _notifyUpdate();
   }
 
   /// 親がタスクを追加する (最後尾に追加)
   Future<void> addTask(String title, String note) async {
-    // 現在のリストの末尾になるようにorderを設定
     final int nextOrder = state.isEmpty ? 0 : state.length;
-
     final newTask = Task(
       id: '',
       title: title,
@@ -106,6 +111,9 @@ class TaskViewModel extends StateNotifier<List<Task>> {
       order: nextOrder,
     );
     await _db.add(newTask.setTaskData());
+
+    // 追加を通知
+    await _notifyUpdate();
   }
 
   /// 子（または親）が完了状態を切り替える
@@ -130,6 +138,8 @@ class TaskViewModel extends StateNotifier<List<Task>> {
       'completedAt': null,
       'requestNote': '',
     });
+    // 訂正承認も「内容変更」なので通知
+    await _notifyUpdate();
   }
 
   /// 親が訂正依頼を「却下」する
@@ -140,7 +150,8 @@ class TaskViewModel extends StateNotifier<List<Task>> {
   /// 親がタスクを削除する
   Future<void> deleteTask(String id) async {
     await _db.doc(id).delete();
-    // 削除後、残ったタスクのorderを詰め直す場合はここでbatch処理
+    // 削除を通知
+    await _notifyUpdate();
   }
 }
 
