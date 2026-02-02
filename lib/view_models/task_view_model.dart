@@ -14,7 +14,7 @@ class TaskViewModel extends StateNotifier<List<Task>> {
   }
 
   /// 更新通知用のフラグをFirebaseに書き込む
-  /// 親が「追加」「削除」「並び替え」をした時に実行する
+  /// 親が「追加」「削除」「並び替え」「編集」をした時に実行する
   Future<void> _notifyUpdate() async {
     await _config.doc('updates').set({
       'lastUpdatedAt': FieldValue.serverTimestamp(),
@@ -62,20 +62,31 @@ class TaskViewModel extends StateNotifier<List<Task>> {
 
   /// タスク一覧のリアルタイム監視 (order順に取得)
   void fetchTasks() {
-    _db
-        .orderBy('order', descending: false)
-        .snapshots()
-        .listen(
-          (snapshot) {
-            state =
-                snapshot.docs
-                    .map((doc) => Task.getTask(doc.data(), doc.id))
-                    .toList();
-          },
-          onError: (error) {
-            if (kDebugMode) print("Firebase Error: $error");
-          },
-        );
+    _db.orderBy('order', descending: false).snapshots().listen(
+      (snapshot) {
+        state = snapshot.docs
+            .map((doc) => Task.getTask(doc.data(), doc.id))
+            .toList();
+      },
+      onError: (error) {
+        if (kDebugMode) print("Firebase Error: $error");
+      },
+    );
+  }
+
+  /// ★ 追加：タスクの編集処理 (親用)
+  Future<void> updateTask(String id, String newTitle, String newNote) async {
+    try {
+      await _db.doc(id).update({
+        'title': newTitle,
+        'note': newNote,
+      });
+
+      // 内容が変わったことを子供側に通知する
+      await _notifyUpdate();
+    } catch (e) {
+      if (kDebugMode) print("Update Task Error: $e");
+    }
   }
 
   /// タスクの並べ替え処理
@@ -122,7 +133,7 @@ class TaskViewModel extends StateNotifier<List<Task>> {
     await _db.doc(id).update({
       'isCompleted': nextStatus,
       'completedAt': nextStatus ? FieldValue.serverTimestamp() : null,
-      'requestNote': '',
+      'requestNote': '', // 完了・未完了を切り替えたら依頼は消去する
     });
   }
 
