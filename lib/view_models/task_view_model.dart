@@ -1,9 +1,14 @@
 import 'dart:io';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
-import '../models/task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../models/task.dart';
+
+final taskProvider = StateNotifierProvider<TaskViewModel, List<Task>>((ref) {
+  return TaskViewModel();
+});
 
 class TaskViewModel extends StateNotifier<List<Task>> {
   final _db = FirebaseFirestore.instance.collection('tasks');
@@ -13,15 +18,14 @@ class TaskViewModel extends StateNotifier<List<Task>> {
     fetchTasks();
   }
 
-  /// 更新通知用のフラグをFirebaseに書き込む
-  /// 親が「追加」「削除」「並び替え」「編集」をした時に実行する
+  // 更新通知用
   Future<void> _notifyUpdate() async {
     await _config.doc('updates').set({
       'lastUpdatedAt': FieldValue.serverTimestamp(),
     });
   }
 
-  /// デバイス固有のIDを取得する
+  // デバイスID取得
   Future<String?> getDeviceId() async {
     if (kIsWeb) return 'web_user';
     final deviceInfo = DeviceInfoPlugin();
@@ -39,7 +43,7 @@ class TaskViewModel extends StateNotifier<List<Task>> {
     return null;
   }
 
-  /// このデバイスを「親」として登録する
+  // 保護者デバイスとして登録
   Future<void> registerAsParent() async {
     final deviceId = await getDeviceId();
     if (deviceId != null) {
@@ -50,7 +54,7 @@ class TaskViewModel extends StateNotifier<List<Task>> {
     }
   }
 
-  /// このデバイスが「親」かどうか判定する
+  // 保護者判定
   Future<bool> isParentDevice() async {
     final deviceId = await getDeviceId();
     final doc = await _config.doc('parent_device').get();
@@ -60,41 +64,93 @@ class TaskViewModel extends StateNotifier<List<Task>> {
     return false;
   }
 
-  /// タスク一覧のリアルタイム監視 (order順に取得)
+  // 現在のタスク一覧取得（メイン画面用：未アーカイブのみ）
   void fetchTasks() {
-    _db.orderBy('order', descending: false).snapshots().listen(
-      (snapshot) {
-        state = snapshot.docs
-            .map((doc) => Task.getTask(doc.data(), doc.id))
-            .toList();
-      },
-      onError: (error) {
-        if (kDebugMode) print("Firebase Error: $error");
-      },
-    );
+    _db
+        .where('isArchived', isEqualTo: false)
+        .snapshots()
+        .listen(
+          (snapshot) {
+            final docs =
+                snapshot.docs.map((doc) {
+                  return Task.getTask(doc.data(), doc.id);
+                }).toList();
+
+            // アプリ側でソート
+            docs.sort((a, b) => a.order.compareTo(b.order));
+            state = docs;
+          },
+          onError: (error) {
+            if (kDebugMode) print("Firestore Error (fetchTasks): $error");
+          },
+        );
   }
 
-  /// ★ 追加：タスクの編集処理 (親用)
-  Future<void> updateTask(String id, String newTitle, String newNote) async {
-    try {
-      await _db.doc(id).update({
-        'title': newTitle,
-        'note': newNote,
+  // 履歴表示：最新の完了が「下」に来るように修正
+  Stream<List<Task>> fetchHistoryTasks() {
+    return _db.where('isCompleted', isEqualTo: true).snapshots().map((
+      snapshot,
+    ) {
+      final list =
+          snapshot.docs.map((doc) => Task.getTask(doc.data(), doc.id)).toList();
+
+      // ★修正箇所：a.compareTo(b) にすることで「古い順 ＝ 最新が下」になります
+      list.sort((a, b) {
+        final aTime = a.completedAt ?? DateTime(0);
+        final bTime = b.completedAt ?? DateTime(0);
+        return aTime.compareTo(bTime);
       });
-
-      // 内容が変わったことを子供側に通知する
-      await _notifyUpdate();
-    } catch (e) {
-      if (kDebugMode) print("Update Task Error: $e");
-    }
+      return list;
+    });
   }
 
-  /// タスクの並べ替え処理
-  Future<void> reorderTasks(int oldIndex, int newIndex) async {
-    if (oldIndex < newIndex) {
-      newIndex -= 1;
-    }
+  // タスク追加
+  Future<void> addTask(String title, String note) async {
+    final int nextOrder = state.length;
+    final docRef = _db.doc();
 
+    await docRef.set({
+      'title': title,
+      'note': note,
+      'isCompleted': false,
+      'isArchived': false,
+      'createdAt': FieldValue.serverTimestamp(),
+      'startedAt': null,
+      'completedAt': null,
+      'order': nextOrder,
+      'requestNote': '',
+    });
+    await _notifyUpdate();
+  }
+
+  // タスク開始
+  Future<void> startTask(String id) async {
+    await _db.doc(id).update({'startedAt': FieldValue.serverTimestamp()});
+    await _notifyUpdate();
+  }
+
+  // 完了切り替え時に completedAt を確実にセット
+  Future<void> toggleTask(String id, bool currentStatus) async {
+    final bool nextStatus = !currentStatus;
+    await _db.doc(id).update({
+      'isCompleted': nextStatus,
+      'completedAt': nextStatus ? FieldValue.serverTimestamp() : null,
+      'requestNote': '',
+    });
+    await _notifyUpdate();
+  }
+
+  Future<void> updateTaskInfo(
+    String id,
+    String newTitle,
+    String newNote,
+  ) async {
+    await _db.doc(id).update({'title': newTitle, 'note': newNote});
+    await _notifyUpdate();
+  }
+
+  Future<void> reorderTasks(int oldIndex, int newIndex) async {
+    if (oldIndex < newIndex) newIndex -= 1;
     final items = [...state];
     final item = items.removeAt(oldIndex);
     items.insert(newIndex, item);
@@ -102,70 +158,82 @@ class TaskViewModel extends StateNotifier<List<Task>> {
 
     final batch = FirebaseFirestore.instance.batch();
     for (int i = 0; i < items.length; i++) {
-      final docRef = _db.doc(items[i].id);
-      batch.update(docRef, {'order': i});
+      batch.update(_db.doc(items[i].id), {'order': i});
     }
     await batch.commit();
-
-    // 並び替え完了を通知
     await _notifyUpdate();
   }
 
-  /// 親がタスクを追加する (最後尾に追加)
-  Future<void> addTask(String title, String note) async {
-    final int nextOrder = state.isEmpty ? 0 : state.length;
-    final newTask = Task(
-      id: '',
-      title: title,
-      note: note,
-      createdAt: DateTime.now(),
-      order: nextOrder,
-    );
-    await _db.add(newTask.setTaskData());
-
-    // 追加を通知
+  Future<void> deleteTask(String id) async {
+    await _db.doc(id).delete();
     await _notifyUpdate();
   }
 
-  /// 子（または親）が完了状態を切り替える
-  Future<void> toggleTask(String id, bool currentStatus) async {
-    final bool nextStatus = !currentStatus;
-    await _db.doc(id).update({
-      'isCompleted': nextStatus,
-      'completedAt': nextStatus ? FieldValue.serverTimestamp() : null,
-      'requestNote': '', // 完了・未完了を切り替えたら依頼は消去する
-    });
-  }
-
-  /// 子が「まちがえた（訂正依頼）」を出す
   Future<void> requestCorrection(String id, String reason) async {
     await _db.doc(id).update({'requestNote': reason});
   }
 
-  /// 親が訂正依頼を「OK」する
   Future<void> approveCorrection(String id) async {
     await _db.doc(id).update({
       'isCompleted': false,
+      'startedAt': null,
       'completedAt': null,
       'requestNote': '',
     });
-    // 訂正承認も「内容変更」なので通知
     await _notifyUpdate();
   }
 
-  /// 親が訂正依頼を「却下」する
   Future<void> rejectCorrection(String id) async {
     await _db.doc(id).update({'requestNote': ''});
   }
 
-  /// 親がタスクを削除する
-  Future<void> deleteTask(String id) async {
-    await _db.doc(id).delete();
-    // 削除を通知
+  // 全タスクをアーカイブ
+  Future<void> archiveAllTasks() async {
+    final snapshots = await _db.where('isArchived', isEqualTo: false).get();
+    final batch = FirebaseFirestore.instance.batch();
+    for (var doc in snapshots.docs) {
+      final data = doc.data();
+      batch.update(doc.reference, {
+        'isArchived': true,
+        'completedAt': data['completedAt'] ?? FieldValue.serverTimestamp(),
+        'isCompleted': true,
+      });
+    }
+    await batch.commit();
+    await _notifyUpdate();
+  }
+
+  Future<void> saveTemplate(String templateKey) async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = state.map((t) => '${t.title}:::${t.note}').toList();
+    await prefs.setStringList('template_$templateKey', data);
+  }
+
+  Future<void> loadTemplate(String templateKey) async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = prefs.getStringList('template_$templateKey');
+    if (data == null || data.isEmpty) return;
+
+    final batch = FirebaseFirestore.instance.batch();
+    int currentOrder = state.length;
+    for (var item in data) {
+      final parts = item.split(':::');
+      final title = parts[0];
+      final note = parts.length > 1 ? parts[1] : '';
+      final docRef = _db.doc();
+      batch.set(docRef, {
+        'title': title,
+        'note': note,
+        'isCompleted': false,
+        'isArchived': false,
+        'createdAt': FieldValue.serverTimestamp(),
+        'startedAt': null,
+        'completedAt': null,
+        'order': currentOrder++,
+        'requestNote': '',
+      });
+    }
+    await batch.commit();
     await _notifyUpdate();
   }
 }
-
-final taskProvider = StateNotifierProvider<TaskViewModel, List<Task>>((ref) {
-  return TaskViewModel();
-});

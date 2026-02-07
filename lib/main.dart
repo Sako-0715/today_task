@@ -3,23 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:intl/intl.dart';
 import 'firebase_options.dart';
 import 'models/task.dart';
 import 'view_models/task_view_model.dart';
 
 enum UserMode { none, parent, child, preview }
 
-// 並び替えモードの状態管理
 final isSortingProvider = StateProvider<bool>((ref) => false);
-
-// 更新監視用のProvider
-final updateStreamProvider = StreamProvider<DocumentSnapshot>((ref) {
-  return FirebaseFirestore.instance
-      .collection('config')
-      .doc('updates')
-      .snapshots();
-});
 
 final userModeProvider = StateNotifierProvider<UserModeNotifier, UserMode>((
   ref,
@@ -32,13 +23,10 @@ class UserModeNotifier extends StateNotifier<UserMode> {
   UserModeNotifier(this.ref) : super(UserMode.none) {
     _initMode();
   }
-
   static const _key = 'user_mode';
-
   Future<void> _initMode() async {
     final prefs = await SharedPreferences.getInstance();
     final savedMode = prefs.getString(_key);
-
     if (savedMode == 'parent') {
       state = UserMode.parent;
     } else if (savedMode == 'child') {
@@ -52,14 +40,11 @@ class UserModeNotifier extends StateNotifier<UserMode> {
   Future<void> setMode(UserMode mode) async {
     state = mode;
     final prefs = await SharedPreferences.getInstance();
-    if (mode != UserMode.preview) {
-      await prefs.setString(_key, mode.name);
-    }
+    if (mode != UserMode.preview) await prefs.setString(_key, mode.name);
   }
 
   void enterPreview() => state = UserMode.preview;
   void exitPreview() => state = UserMode.parent;
-
   Future<void> logout() async {
     state = UserMode.none;
     final prefs = await SharedPreferences.getInstance();
@@ -75,7 +60,6 @@ void main() async {
 
 class MyApp extends ConsumerWidget {
   const MyApp({super.key});
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final mode = ref.watch(userModeProvider);
@@ -91,18 +75,19 @@ class MyApp extends ConsumerWidget {
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.white,
           foregroundColor: Colors.black,
+          elevation: 0,
         ),
       ),
-      home: mode == UserMode.none
-          ? const ModeSelectionPage()
-          : const TaskListPage(),
+      home:
+          mode == UserMode.none
+              ? const ModeSelectionPage()
+              : const TaskListPage(),
     );
   }
 }
 
 class ModeSelectionPage extends ConsumerWidget {
   const ModeSelectionPage({super.key});
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
@@ -112,7 +97,7 @@ class ModeSelectionPage extends ConsumerWidget {
           children: [
             const Text(
               'どちらで使いますか？',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 40),
             Row(
@@ -120,14 +105,16 @@ class ModeSelectionPage extends ConsumerWidget {
               children: [
                 _buildModeButton(
                   context,
-                  'タスク確認\n(かくにん)',
+                  'タスク確認\n(こども用)',
+                  Colors.orange,
                   () => ref
                       .read(userModeProvider.notifier)
                       .setMode(UserMode.child),
                 ),
                 _buildModeButton(
                   context,
-                  'タスク登録\n(とうろく)',
+                  'タスク登録\n(おとな用)',
+                  Colors.blue,
                   () => _showAuthDialog(context, ref),
                 ),
               ],
@@ -141,14 +128,27 @@ class ModeSelectionPage extends ConsumerWidget {
   Widget _buildModeButton(
     BuildContext context,
     String text,
+    Color color,
     VoidCallback onPressed,
   ) {
     return SizedBox(
       width: 150,
-      height: 100,
+      height: 120,
       child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color.withOpacity(0.1),
+          foregroundColor: color,
+          side: BorderSide(color: color, width: 2),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+        ),
         onPressed: onPressed,
-        child: Text(text, textAlign: TextAlign.center),
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
       ),
     );
   }
@@ -158,40 +158,43 @@ class ModeSelectionPage extends ConsumerWidget {
     final passController = TextEditingController();
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('ログイン'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: idController,
-              decoration: const InputDecoration(labelText: 'ID'),
+      builder:
+          (context) => AlertDialog(
+            title: const Text('保護者ログイン'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: idController,
+                  decoration: const InputDecoration(labelText: 'ID'),
+                ),
+                TextField(
+                  controller: passController,
+                  decoration: const InputDecoration(labelText: 'パスワード'),
+                  obscureText: true,
+                ),
+              ],
             ),
-            TextField(
-              controller: passController,
-              decoration: const InputDecoration(labelText: 'パスワード'),
-              obscureText: true,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('キャンセル'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('キャンセル'),
+              ),
+              TextButton(
+                onPressed: () async {
+                  if (idController.text == 'admin' &&
+                      passController.text == '1234') {
+                    Navigator.pop(context);
+                    await ref.read(taskProvider.notifier).registerAsParent();
+                    ref
+                        .read(userModeProvider.notifier)
+                        .setMode(UserMode.parent);
+                  }
+                },
+                child: const Text('OK'),
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () async {
-              if (idController.text == 'admin' &&
-                  passController.text == '1234') {
-                Navigator.pop(context);
-                await ref.read(taskProvider.notifier).registerAsParent();
-                ref.read(userModeProvider.notifier).setMode(UserMode.parent);
-              }
-            },
-            child: const Text('OK'),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -207,135 +210,163 @@ class TaskListPage extends ConsumerWidget {
     final bool isParent = mode == UserMode.parent;
     final bool isPreview = mode == UserMode.preview;
 
-    if (mode == UserMode.child) {
-      ref.listen(updateStreamProvider, (previous, next) {
-        final hasStarted = taskList.any((task) => task.isCompleted);
-        if (hasStarted && previous != null && next.hasValue) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('⚠️ リロードしてください'),
-              backgroundColor: Colors.orange,
-              duration: Duration(seconds: 10),
-            ),
-          );
-        }
-      });
-    }
-
     return Scaffold(
       appBar: AppBar(
         title: Text(
           isParent
-              ? (isSorting ? '並び替え中...' : 'タスク管理')
+              ? (isSorting ? 'ならびかえ中' : 'タスク管理')
               : isPreview
-                  ? '子の画面(プレビュー)'
-                  : '今日のタスク',
+              ? '子の画面(プレビュー)'
+              : '今日のタスク',
         ),
         centerTitle: true,
         leadingWidth: 80,
-        leading: isParent
-            ? _buildIconButton(
-                Icons.child_care,
-                '子の画面',
-                () => ref.read(userModeProvider.notifier).enterPreview(),
-              )
-            : isPreview
+        leading:
+            isParent
+                ? _buildAppBarAction(
+                  Icons.child_care,
+                  'プレビュー',
+                  () => ref.read(userModeProvider.notifier).enterPreview(),
+                )
+                : isPreview
                 ? IconButton(
-                    icon: const Icon(Icons.arrow_back),
-                    onPressed: () =>
-                        ref.read(userModeProvider.notifier).exitPreview(),
-                  )
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed:
+                      () => ref.read(userModeProvider.notifier).exitPreview(),
+                )
                 : null,
         actions: [
+          _buildAppBarAction(
+            Icons.history,
+            '履歴',
+            () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const HistoryPage()),
+            ),
+          ),
+          if (isParent && !isSorting)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.copy_all, color: Colors.blue),
+              onSelected: (val) => _handleTemplateAction(context, ref, val),
+              itemBuilder:
+                  (context) => [
+                    const PopupMenuItem(
+                      value: 'load_weekday',
+                      child: Text('平日のセットを読込'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'load_weekend',
+                      child: Text('土日のセットを読込'),
+                    ),
+                    const PopupMenuDivider(),
+                    const PopupMenuItem(
+                      value: 'save_weekday',
+                      child: Text('今のリストを平日用に保存'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'save_weekend',
+                      child: Text('今のリストを土日用に保存'),
+                    ),
+                    const PopupMenuDivider(),
+                    const PopupMenuItem(
+                      value: 'clear',
+                      child: Text(
+                        '今のリストを履歴へ移動',
+                        style: TextStyle(color: Colors.red),
+                      ),
+                    ),
+                  ],
+            ),
           if (isParent)
             TextButton.icon(
-              onPressed: () =>
-                  ref.read(isSortingProvider.notifier).state = !isSorting,
-              icon: Icon(isSorting ? Icons.check : Icons.sort,
-                  color: isSorting ? Colors.green : Colors.blue),
-              label: Text(isSorting ? '完了' : '順序',
-                  style:
-                      TextStyle(color: isSorting ? Colors.green : Colors.blue)),
+              onPressed:
+                  () => ref.read(isSortingProvider.notifier).state = !isSorting,
+              icon: Icon(
+                isSorting ? Icons.check_circle : Icons.sort,
+                color: isSorting ? Colors.green : Colors.blue,
+              ),
+              label: Text(
+                isSorting ? '完了' : '順序',
+                style: TextStyle(color: isSorting ? Colors.green : Colors.blue),
+              ),
             ),
           if (!isPreview)
-            _buildIconButton(
+            _buildAppBarAction(
               Icons.logout,
-              'ログアウト',
+              '終了',
               () => ref.read(userModeProvider.notifier).logout(),
             ),
         ],
       ),
       body: RefreshIndicator(
         onRefresh: () async {
-          ScaffoldMessenger.of(context).hideCurrentSnackBar();
           ref.read(taskProvider.notifier).fetchTasks();
           await Future.delayed(const Duration(milliseconds: 500));
         },
-        child: taskList.isEmpty
-            ? const Center(
-                child: SingleChildScrollView(
-                  physics: AlwaysScrollableScrollPhysics(),
-                  child: SizedBox(
-                    height: 200,
-                    child: Center(child: Text('タスクはありません')),
+        child:
+            taskList.isEmpty
+                ? const Center(
+                  child: SingleChildScrollView(
+                    physics: AlwaysScrollableScrollPhysics(),
+                    child: Text('タスクがありません'),
                   ),
-                ),
-              )
-            : (isParent && isSorting)
+                )
+                : (isParent && isSorting)
                 ? ReorderableListView.builder(
-                    itemCount: taskList.length,
-                    buildDefaultDragHandles: false,
-                    proxyDecorator: (child, index, animation) => Material(
-                      child: child,
-                      elevation: 6,
-                      color: Colors.blue.withOpacity(0.1),
-                    ),
-                    onReorder: (old, next) =>
-                        ref.read(taskProvider.notifier).reorderTasks(old, next),
-                    itemBuilder: (context, index) {
-                      return _buildTaskTile(
+                  itemCount: taskList.length,
+                  onReorder:
+                      (old, next) => ref
+                          .read(taskProvider.notifier)
+                          .reorderTasks(old, next),
+                  itemBuilder:
+                      (context, index) => _buildTaskTile(
                         context,
                         ref,
                         taskList[index],
                         mode,
                         index: index,
-                        isSorting: isSorting,
+                        isSorting: true,
                         key: ValueKey(taskList[index].id),
-                      );
-                    },
-                  )
+                      ),
+                )
                 : ListView.builder(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    itemCount: taskList.length,
-                    itemBuilder: (context, index) => _buildTaskTile(
-                      context,
-                      ref,
-                      taskList[index],
-                      mode,
-                      index: index,
-                      isSorting: isSorting,
-                      key: ValueKey(taskList[index].id),
-                    ),
-                  ),
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  itemCount: taskList.length,
+                  itemBuilder:
+                      (context, index) => _buildTaskTile(
+                        context,
+                        ref,
+                        taskList[index],
+                        mode,
+                        index: index,
+                        isSorting: false,
+                        key: ValueKey(taskList[index].id),
+                      ),
+                ),
       ),
-      floatingActionButton: (isParent && !isSorting)
-          ? FloatingActionButton(
-              onPressed: () => _showAddTaskDialog(context, ref),
-              child: const Icon(Icons.add),
-            )
-          : null,
+      floatingActionButton:
+          (isParent && !isSorting)
+              ? FloatingActionButton(
+                onPressed: () => _showAddTaskDialog(context, ref),
+                child: const Icon(Icons.add),
+              )
+              : null,
     );
   }
 
-  Widget _buildIconButton(IconData icon, String label, VoidCallback onTap) {
+  // --- ヘルパー関数群 ---
+  Widget _buildAppBarAction(IconData icon, String label, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 22),
-          Text(label, style: const TextStyle(fontSize: 10)),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 22),
+            Text(label, style: const TextStyle(fontSize: 10)),
+          ],
+        ),
       ),
     );
   }
@@ -352,68 +383,83 @@ class TaskListPage extends ConsumerWidget {
     final bool isParent = mode == UserMode.parent;
     final bool isPreview = mode == UserMode.preview;
 
-    return ListTile(
+    return Card(
       key: key,
-      leading: isParent
-          ? (isSorting
-              ? ReorderableDragStartListener(
-                  index: index,
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    child: Icon(Icons.drag_handle, color: Colors.blue),
-                  ),
-                )
-              : const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 10),
-                  child: Icon(Icons.task_alt, color: Colors.grey),
-                ))
-          : Checkbox(
-              value: task.isCompleted,
-              onChanged: (isPreview || task.isCompleted)
-                  ? null
-                  : (val) => _showCompleteConfirmDialog(context, ref, task),
-            ),
-      title: Text(
-        task.title,
-        style: TextStyle(
-          decoration: task.isCompleted ? TextDecoration.lineThrough : null,
-          color: task.isCompleted ? Colors.grey : Colors.black,
-        ),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade200),
       ),
-      subtitle: _buildSubtitle(task),
-      trailing: isParent
-          ? (isSorting ? null : _buildParentActions(context, ref, task))
-          : _buildChildActions(context, ref, task, isPreview),
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: ListTile(
+        leading:
+            isSorting
+                ? ReorderableDragStartListener(
+                  index: index,
+                  child: const Icon(Icons.drag_handle, color: Colors.blue),
+                )
+                : Icon(
+                  task.isCompleted
+                      ? Icons.check_circle
+                      : Icons.radio_button_unchecked,
+                  color: task.isCompleted ? Colors.green : Colors.grey,
+                ),
+        title: Text(
+          task.title,
+          style: TextStyle(
+            decoration: task.isCompleted ? TextDecoration.lineThrough : null,
+            color: task.isCompleted ? Colors.grey : Colors.black,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        subtitle: _buildSubtitle(task),
+        trailing:
+            isParent
+                ? (isSorting ? null : _buildParentActions(context, ref, task))
+                : _buildChildActions(context, ref, task, isPreview),
+      ),
     );
   }
 
   Widget _buildSubtitle(Task task) {
+    String formatTime(DateTime? dt) =>
+        dt != null ? DateFormat('HH:mm').format(dt) : "--:--";
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (task.note.isNotEmpty)
           Text(
-            '※ ${task.note}',
-            style: const TextStyle(color: Colors.deepOrange, fontSize: 13),
+            '💡 ${task.note}',
+            style: const TextStyle(color: Colors.blueGrey, fontSize: 13),
           ),
-        if (task.isCompleted && task.completedAt != null)
-          Text(
-            '✅ ${task.completedAt!.hour}時${task.completedAt!.minute.toString().padLeft(2, '0')}分 に完了',
-            style: const TextStyle(
-              color: Colors.blue,
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-            ),
-          ),
+        Row(
+          children: [
+            if (task.startedAt != null)
+              Text(
+                '▶️ ${formatTime(task.startedAt)} ',
+                style: const TextStyle(fontSize: 11, color: Colors.blue),
+              ),
+            if (task.completedAt != null)
+              Text(
+                '✅ ${formatTime(task.completedAt)}',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Colors.green,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+          ],
+        ),
         if (task.requestNote.isNotEmpty)
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
+            margin: const EdgeInsets.only(top: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
               color: Colors.red.shade50,
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(
-              '⚠️ていせいいらい：${task.requestNote}',
+              '⚠️しゅうせい依頼：${task.requestNote}',
               style: const TextStyle(
                 color: Colors.red,
                 fontSize: 11,
@@ -431,52 +477,73 @@ class TaskListPage extends ConsumerWidget {
     Task task,
     bool isPreview,
   ) {
-    if (task.isCompleted && task.requestNote.isEmpty) {
-      return TextButton(
-        onPressed: isPreview
-            ? null
-            : () => _showRequestCorrectionDialog(context, ref, task),
-        child: const Text(
-          'まちがえた',
-          style: TextStyle(color: Colors.redAccent, fontSize: 12),
+    if (task.isCompleted) {
+      if (task.requestNote.isEmpty)
+        return TextButton(
+          onPressed:
+              isPreview
+                  ? null
+                  : () => _showRequestCorrectionDialog(context, ref, task),
+          child: const Text(
+            'まちがえた',
+            style: TextStyle(color: Colors.redAccent, fontSize: 12),
+          ),
+        );
+      return null;
+    }
+    if (task.startedAt == null) {
+      return ElevatedButton(
+        onPressed:
+            isPreview
+                ? null
+                : () => ref.read(taskProvider.notifier).startTask(task.id),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.blue,
+          foregroundColor: Colors.white,
         ),
+        child: const Text('はじめる'),
+      );
+    } else {
+      return ElevatedButton(
+        onPressed:
+            isPreview
+                ? null
+                : () => _showCompleteConfirmDialog(context, ref, task),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.green,
+          foregroundColor: Colors.white,
+        ),
+        child: const Text('おわった！'),
       );
     }
-    return null;
   }
 
-  // ★ 修正：親のアクションボタン（編集ボタン・戻すボタン・削除ボタン）
   Widget _buildParentActions(BuildContext context, WidgetRef ref, Task task) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // 1. 編集ボタン (Icons.edit)
-        IconButton(
-          icon: const Icon(Icons.edit, color: Colors.blueAccent, size: 20),
-          tooltip: '編集',
-          onPressed: () => _showEditTaskDialog(context, ref, task),
-        ),
-        // 2. 訂正依頼がある場合の対応
         if (task.requestNote.isNotEmpty) ...[
           IconButton(
             icon: const Icon(Icons.check_circle_outline, color: Colors.green),
-            onPressed: () =>
-                ref.read(taskProvider.notifier).approveCorrection(task.id),
+            onPressed:
+                () =>
+                    ref.read(taskProvider.notifier).approveCorrection(task.id),
           ),
           IconButton(
             icon: const Icon(Icons.highlight_off, color: Colors.red),
-            onPressed: () =>
-                ref.read(taskProvider.notifier).rejectCorrection(task.id),
+            onPressed:
+                () => ref.read(taskProvider.notifier).rejectCorrection(task.id),
           ),
         ],
-        // 3. 完了済みタスクを戻すボタン (Icons.undo)
+        IconButton(
+          icon: const Icon(Icons.edit, color: Colors.blueAccent, size: 20),
+          onPressed: () => _showEditTaskDialog(context, ref, task),
+        ),
         if (task.isCompleted && task.requestNote.isEmpty)
           IconButton(
             icon: const Icon(Icons.undo, color: Colors.orange, size: 20),
-            tooltip: '未完了に戻す',
             onPressed: () => _showUndoConfirmDialog(context, ref, task),
           ),
-        // 4. 削除ボタン (Icons.delete)
         IconButton(
           icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
           onPressed: () => ref.read(taskProvider.notifier).deleteTask(task.id),
@@ -485,73 +552,155 @@ class TaskListPage extends ConsumerWidget {
     );
   }
 
-  // ★ 追加：タスクを編集するためのダイアログ
+  // --- ダイアログ・通知系 ---
+  void _handleTemplateAction(
+    BuildContext context,
+    WidgetRef ref,
+    String action,
+  ) async {
+    final notifier = ref.read(taskProvider.notifier);
+    if (action == 'clear') {
+      _showConfirmDialog(
+        context,
+        '履歴へ移動',
+        '全てのタスクを履歴に送りますか？',
+        () => notifier.archiveAllTasks(),
+      );
+    } else if (action == 'save_weekday') {
+      await notifier.saveTemplate('weekday');
+      _showSnackBar(context, '平日用として保存しました');
+    } else if (action == 'save_weekend') {
+      await notifier.saveTemplate('weekend');
+      _showSnackBar(context, '土日用として保存しました');
+    } else if (action == 'load_weekday') {
+      await notifier.loadTemplate('weekday');
+      _showSnackBar(context, '平日のセットを追加しました');
+    } else if (action == 'load_weekend') {
+      await notifier.loadTemplate('weekend');
+      _showSnackBar(context, '土日のセットを追加しました');
+    }
+  }
+
+  void _showConfirmDialog(
+    BuildContext context,
+    String title,
+    String msg,
+    VoidCallback onConfirm,
+  ) {
+    showDialog(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: Text(title),
+            content: Text(msg),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('キャンセル'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  onConfirm();
+                  Navigator.pop(ctx);
+                },
+                child: const Text('実行'),
+              ),
+            ],
+          ),
+    );
+  }
+
+  void _showSnackBar(BuildContext context, String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+    );
+  }
+
+  void _showAddTaskDialog(BuildContext context, WidgetRef ref) {
+    final titleController = TextEditingController();
+    final noteController = TextEditingController();
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('新しいタスクを追加'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(hintText: 'タスク名'),
+                ),
+                TextField(
+                  controller: noteController,
+                  decoration: const InputDecoration(hintText: 'メモ・注意点'),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('キャンセル'),
+              ),
+              TextButton(
+                onPressed: () {
+                  if (titleController.text.isNotEmpty) {
+                    ref
+                        .read(taskProvider.notifier)
+                        .addTask(titleController.text, noteController.text);
+                    Navigator.pop(context);
+                  }
+                },
+                child: const Text('追加'),
+              ),
+            ],
+          ),
+    );
+  }
+
   void _showEditTaskDialog(BuildContext context, WidgetRef ref, Task task) {
     final titleController = TextEditingController(text: task.title);
     final noteController = TextEditingController(text: task.note);
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('タスクを編集'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: titleController,
-              decoration: const InputDecoration(labelText: 'タスク名'),
+      builder:
+          (context) => AlertDialog(
+            title: const Text('タスクを編集'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(labelText: 'タスク名'),
+                ),
+                TextField(
+                  controller: noteController,
+                  decoration: const InputDecoration(labelText: 'メモ'),
+                ),
+              ],
             ),
-            TextField(
-              controller: noteController,
-              decoration: const InputDecoration(labelText: '注意書き'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('キャンセル'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('キャンセル'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  if (titleController.text.isNotEmpty) {
+                    await ref
+                        .read(taskProvider.notifier)
+                        .updateTaskInfo(
+                          task.id,
+                          titleController.text,
+                          noteController.text,
+                        );
+                    Navigator.pop(context);
+                  }
+                },
+                child: const Text('保存'),
+              ),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () async {
-              if (titleController.text.isNotEmpty) {
-                // ViewModelのupdateTaskを呼び出し
-                await ref.read(taskProvider.notifier).updateTask(
-                      task.id,
-                      titleController.text,
-                      noteController.text,
-                    );
-                Navigator.pop(context);
-              }
-            },
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showUndoConfirmDialog(BuildContext context, WidgetRef ref, Task task) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('やり直しにしますか？'),
-        content: Text('「${task.title}」を未完了に戻します。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('キャンセル'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              ref
-                  .read(taskProvider.notifier)
-                  .toggleTask(task.id, task.isCompleted);
-              Navigator.pop(context);
-            },
-            child: const Text('戻す'),
-          ),
-        ],
-      ),
     );
   }
 
@@ -562,25 +711,26 @@ class TaskListPage extends ConsumerWidget {
   ) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('おわった！'),
-        content: Text('「${task.title}」を登録してもいい？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('まだ'),
+      builder:
+          (context) => AlertDialog(
+            title: const Text('おわった！'),
+            content: Text('「${task.title}」を登録してもいい？'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('まだ'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  ref
+                      .read(taskProvider.notifier)
+                      .toggleTask(task.id, task.isCompleted);
+                  Navigator.pop(context);
+                },
+                child: const Text('登録する'),
+              ),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () {
-              ref
-                  .read(taskProvider.notifier)
-                  .toggleTask(task.id, task.isCompleted);
-              Navigator.pop(context);
-            },
-            child: const Text('登録する'),
-          ),
-        ],
-      ),
     );
   }
 
@@ -592,70 +742,147 @@ class TaskListPage extends ConsumerWidget {
     final controller = TextEditingController();
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('まちがえた？'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(hintText: 'りゆう'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('やめる'),
+      builder:
+          (context) => AlertDialog(
+            title: const Text('まちがえた？'),
+            content: TextField(
+              controller: controller,
+              decoration: const InputDecoration(hintText: 'りゆう（例：まだやってなかった）'),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('やめる'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  if (controller.text.isNotEmpty) {
+                    ref
+                        .read(taskProvider.notifier)
+                        .requestCorrection(task.id, controller.text);
+                    Navigator.pop(context);
+                  }
+                },
+                child: const Text('おくる'),
+              ),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () {
-              if (controller.text.isNotEmpty) {
-                ref
-                    .read(taskProvider.notifier)
-                    .requestCorrection(task.id, controller.text);
-                Navigator.pop(context);
-              }
-            },
-            child: const Text('おくる'),
-          ),
-        ],
-      ),
     );
   }
 
-  void _showAddTaskDialog(BuildContext context, WidgetRef ref) {
-    final titleController = TextEditingController();
-    final noteController = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('新しいタスクを追加'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: titleController,
-              decoration: const InputDecoration(hintText: 'タスク名'),
-            ),
-            TextField(
-              controller: noteController,
-              decoration: const InputDecoration(hintText: '注意書き'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('キャンセル'),
-          ),
-          TextButton(
-            onPressed: () {
-              if (titleController.text.isNotEmpty) {
-                ref
-                    .read(taskProvider.notifier)
-                    .addTask(titleController.text, noteController.text);
-                Navigator.pop(context);
-              }
+  void _showUndoConfirmDialog(BuildContext context, WidgetRef ref, Task task) {
+    _showConfirmDialog(context, 'やり直し', '「${task.title}」を未完了に戻しますか？', () {
+      ref.read(taskProvider.notifier).toggleTask(task.id, task.isCompleted);
+    });
+  }
+}
+
+// --- 履歴・日付詳細画面 ---
+class HistoryPage extends ConsumerWidget {
+  const HistoryPage({super.key});
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final historyStream = ref.watch(taskProvider.notifier).fetchHistoryTasks();
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('おわった記録'), centerTitle: true),
+      body: StreamBuilder<List<Task>>(
+        stream: historyStream,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting)
+            return const Center(child: CircularProgressIndicator());
+
+          if (snapshot.hasError) return Center(child: Text('読み込みエラーが発生しました'));
+
+          if (!snapshot.hasData || snapshot.data!.isEmpty)
+            return const Center(child: Text('まだ履歴がありません'));
+
+          final allHistoryTasks = snapshot.data!;
+          final Map<String, List<Task>> groupedTasks = {};
+          for (var task in allHistoryTasks) {
+            if (task.completedAt != null) {
+              final dateKey = DateFormat(
+                'yyyy/MM/dd',
+              ).format(task.completedAt!);
+              groupedTasks.putIfAbsent(dateKey, () => []).add(task);
+            }
+          }
+          final sortedDates =
+              groupedTasks.keys.toList()..sort((a, b) => b.compareTo(a));
+
+          return ListView.builder(
+            itemCount: sortedDates.length,
+            itemBuilder: (context, index) {
+              final dateStr = sortedDates[index];
+              return ListTile(
+                leading: const Icon(Icons.calendar_month, color: Colors.blue),
+                title: Text(
+                  dateStr,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Text('${groupedTasks[dateStr]!.length} 個のタスクを完了'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  // その日のタスクだけをフィルタリングして渡す
+                  final tasksOfThisDay = groupedTasks[dateStr]!;
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder:
+                          (context) => DateDetailPage(
+                            tasks: tasksOfThisDay,
+                            dateString: dateStr,
+                          ),
+                    ),
+                  );
+                },
+              );
             },
-            child: const Text('追加'),
-          ),
-        ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class DateDetailPage extends StatelessWidget {
+  final List<Task> tasks;
+  final String dateString;
+  const DateDetailPage({
+    super.key,
+    required this.tasks,
+    required this.dateString,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // 複雑なFirebaseクエリを使わず、渡されたリストを表示するだけに修正
+    return Scaffold(
+      appBar: AppBar(title: Text('$dateString の詳細')),
+      body: ListView.builder(
+        itemCount: tasks.length,
+        itemBuilder: (context, index) {
+          final task = tasks[index];
+          final startTime =
+              task.startedAt != null
+                  ? DateFormat('HH:mm').format(task.startedAt!)
+                  : "--:--";
+          final endTime =
+              task.completedAt != null
+                  ? DateFormat('HH:mm').format(task.completedAt!)
+                  : "--:--";
+          return Card(
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: ListTile(
+              leading: const Icon(Icons.check_circle, color: Colors.green),
+              title: Text(
+                task.title,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              subtitle: Text('時間: $startTime 〜 $endTime\n${task.note}'),
+            ),
+          );
+        },
       ),
     );
   }
