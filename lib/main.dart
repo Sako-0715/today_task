@@ -64,8 +64,6 @@ class MyApp extends ConsumerWidget {
         return const ChildTaskPage();
 
       case UserMode.none:
-      default:
-        // モード未選択：最初の選択画面へ
         return const ModeSelectionPage();
     }
   }
