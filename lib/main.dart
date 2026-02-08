@@ -354,7 +354,6 @@ class TaskListPage extends ConsumerWidget {
     );
   }
 
-  // --- ヘルパー関数群 ---
   Widget _buildAppBarAction(IconData icon, String label, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
@@ -552,7 +551,6 @@ class TaskListPage extends ConsumerWidget {
     );
   }
 
-  // --- ダイアログ・通知系 ---
   void _handleTemplateAction(
     BuildContext context,
     WidgetRef ref,
@@ -563,7 +561,7 @@ class TaskListPage extends ConsumerWidget {
       _showConfirmDialog(
         context,
         '履歴へ移動',
-        '全てのタスクを履歴に送りますか？',
+        '完了したタスクを履歴に送りますか？', // テキストはほぼ維持
         () => notifier.archiveAllTasks(),
       );
     } else if (action == 'save_weekday') {
@@ -777,7 +775,6 @@ class TaskListPage extends ConsumerWidget {
   }
 }
 
-// --- 履歴・日付詳細画面 ---
 class HistoryPage extends ConsumerWidget {
   const HistoryPage({super.key});
   @override
@@ -792,7 +789,8 @@ class HistoryPage extends ConsumerWidget {
           if (snapshot.connectionState == ConnectionState.waiting)
             return const Center(child: CircularProgressIndicator());
 
-          if (snapshot.hasError) return Center(child: Text('読み込みエラーが発生しました'));
+          if (snapshot.hasError)
+            return const Center(child: Text('読み込みエラーが発生しました'));
 
           if (!snapshot.hasData || snapshot.data!.isEmpty)
             return const Center(child: Text('まだ履歴がありません'));
@@ -823,7 +821,6 @@ class HistoryPage extends ConsumerWidget {
                 subtitle: Text('${groupedTasks[dateStr]!.length} 個のタスクを完了'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
-                  // その日のタスクだけをフィルタリングして渡す
                   final tasksOfThisDay = groupedTasks[dateStr]!;
                   Navigator.push(
                     context,
@@ -856,7 +853,6 @@ class DateDetailPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 複雑なFirebaseクエリを使わず、渡されたリストを表示するだけに修正
     return Scaffold(
       appBar: AppBar(title: Text('$dateString の詳細')),
       body: ListView.builder(

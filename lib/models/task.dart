@@ -5,8 +5,9 @@ class Task {
   final String title;
   final String note;
   final bool isCompleted;
+  final bool isArchived; // ★ 追加：アーカイブ状態（履歴送り）か
   final DateTime createdAt;
-  final DateTime? startedAt; // ★ 追加：開始した時間
+  final DateTime? startedAt;
   final DateTime? completedAt;
   final String requestNote;
   final int order;
@@ -16,8 +17,9 @@ class Task {
     required this.title,
     this.note = '',
     this.isCompleted = false,
+    this.isArchived = false, // ★ デフォルトはfalse
     required this.createdAt,
-    this.startedAt, // ★ 追加
+    this.startedAt,
     this.completedAt,
     this.requestNote = '',
     this.order = 0,
@@ -28,8 +30,9 @@ class Task {
     String? title,
     String? note,
     bool? isCompleted,
+    bool? isArchived, // ★ 追加
     DateTime? createdAt,
-    DateTime? startedAt, // ★ 追加
+    DateTime? startedAt,
     DateTime? completedAt,
     String? requestNote,
     int? order,
@@ -39,6 +42,7 @@ class Task {
       title: title ?? this.title,
       note: note ?? this.note,
       isCompleted: isCompleted ?? this.isCompleted,
+      isArchived: isArchived ?? this.isArchived, // ★ 追加
       createdAt: createdAt ?? this.createdAt,
       startedAt: startedAt ?? this.startedAt,
       completedAt: completedAt ?? this.completedAt,
@@ -53,13 +57,13 @@ class Task {
       title: map['title'] ?? '',
       note: map['note'] ?? '',
       isCompleted: map['isCompleted'] ?? false,
+      isArchived: map['isArchived'] ?? false, // ★ 追加
       createdAt:
           map['createdAt'] is Timestamp
               ? (map['createdAt'] as Timestamp).toDate()
               : DateTime.now(),
       startedAt:
-          map['startedAt']
-                  is Timestamp // ★ 追加
+          map['startedAt'] is Timestamp
               ? (map['startedAt'] as Timestamp).toDate()
               : null,
       completedAt:
@@ -76,8 +80,9 @@ class Task {
       'title': title,
       'note': note,
       'isCompleted': isCompleted,
+      'isArchived': isArchived, // ★ 追加
       'createdAt': createdAt,
-      'startedAt': startedAt, // ★ 追加
+      'startedAt': startedAt,
       'completedAt': completedAt,
       'requestNote': requestNote,
       'order': order,

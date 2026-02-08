@@ -64,7 +64,7 @@ class TaskViewModel extends StateNotifier<List<Task>> {
     return false;
   }
 
-  // 現在のタスク一覧取得（メイン画面用：未アーカイブのみ）
+  // 現在のタスク一覧取得（メイン画面用：isArchived が false のものだけ表示）
   void fetchTasks() {
     _db
         .where('isArchived', isEqualTo: false)
@@ -76,7 +76,7 @@ class TaskViewModel extends StateNotifier<List<Task>> {
                   return Task.getTask(doc.data(), doc.id);
                 }).toList();
 
-            // アプリ側でソート
+            // アプリ側でソート（order順）
             docs.sort((a, b) => a.order.compareTo(b.order));
             state = docs;
           },
@@ -86,15 +86,13 @@ class TaskViewModel extends StateNotifier<List<Task>> {
         );
   }
 
-  // 履歴表示：最新の完了が「下」に来るように修正
+  // 履歴表示：完了したタスク（isCompleted: true）をすべて取得
+  // ★UIに変更を加えず、ロジックのみで「最新の完了が下」を維持
   Stream<List<Task>> fetchHistoryTasks() {
-    return _db.where('isCompleted', isEqualTo: true).snapshots().map((
-      snapshot,
-    ) {
+    return _db.where('isArchived', isEqualTo: true).snapshots().map((snapshot) {
       final list =
           snapshot.docs.map((doc) => Task.getTask(doc.data(), doc.id)).toList();
 
-      // ★修正箇所：a.compareTo(b) にすることで「古い順 ＝ 最新が下」になります
       list.sort((a, b) {
         final aTime = a.completedAt ?? DateTime(0);
         final bTime = b.completedAt ?? DateTime(0);
@@ -129,7 +127,7 @@ class TaskViewModel extends StateNotifier<List<Task>> {
     await _notifyUpdate();
   }
 
-  // 完了切り替え時に completedAt を確実にセット
+  // 完了・未完了の切り替え
   Future<void> toggleTask(String id, bool currentStatus) async {
     final bool nextStatus = !currentStatus;
     await _db.doc(id).update({
@@ -140,6 +138,7 @@ class TaskViewModel extends StateNotifier<List<Task>> {
     await _notifyUpdate();
   }
 
+  // タスク内容更新
   Future<void> updateTaskInfo(
     String id,
     String newTitle,
@@ -149,6 +148,7 @@ class TaskViewModel extends StateNotifier<List<Task>> {
     await _notifyUpdate();
   }
 
+  // 並び替えロジック
   Future<void> reorderTasks(int oldIndex, int newIndex) async {
     if (oldIndex < newIndex) newIndex -= 1;
     final items = [...state];
@@ -164,11 +164,13 @@ class TaskViewModel extends StateNotifier<List<Task>> {
     await _notifyUpdate();
   }
 
+  // 物理削除（ゴミ箱アイコン用：履歴からも消したい場合はこれ）
   Future<void> deleteTask(String id) async {
     await _db.doc(id).delete();
     await _notifyUpdate();
   }
 
+  // --- 修正依頼系ロジック（そのまま） ---
   Future<void> requestCorrection(String id, String reason) async {
     await _db.doc(id).update({'requestNote': reason});
   }
@@ -187,22 +189,27 @@ class TaskViewModel extends StateNotifier<List<Task>> {
     await _db.doc(id).update({'requestNote': ''});
   }
 
-  // 全タスクをアーカイブ
+  // ★【追加・修正機能】完了したタスクを一括でアーカイブ（履歴へ移動）する
+  // このボタンが押されると isArchived が true になり、メインリストから消える
   Future<void> archiveAllTasks() async {
-    final snapshots = await _db.where('isArchived', isEqualTo: false).get();
+    // 現在表示されている（isArchived: false）かつ 完了済み（isCompleted: true）のものを対象にする
+    final snapshots =
+        await _db
+            .where('isArchived', isEqualTo: false)
+            .where('isCompleted', isEqualTo: true)
+            .get();
+
+    if (snapshots.docs.isEmpty) return;
+
     final batch = FirebaseFirestore.instance.batch();
     for (var doc in snapshots.docs) {
-      final data = doc.data();
-      batch.update(doc.reference, {
-        'isArchived': true,
-        'completedAt': data['completedAt'] ?? FieldValue.serverTimestamp(),
-        'isCompleted': true,
-      });
+      batch.update(doc.reference, {'isArchived': true});
     }
     await batch.commit();
     await _notifyUpdate();
   }
 
+  // --- テンプレート機能 ---
   Future<void> saveTemplate(String templateKey) async {
     final prefs = await SharedPreferences.getInstance();
     final data = state.map((t) => '${t.title}:::${t.note}').toList();
